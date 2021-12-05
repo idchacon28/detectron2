@@ -3,8 +3,8 @@ import argparse
 import os
 
 parser=argparse.ArgumentParser()
-parser.add_argument('--mode', help='mode in which the program is going to be runned (test or demo)', type=str)
-parser.add_argument('--img', help='Image name for demo', type=str)
+parser.add_argument('--mode', help='mode in which the program is going to be runned (test or demo)', type=str, default="demo")
+parser.add_argument('--img', help='Image name for demo', type=str, default="cicla.jpg")
 args = parser.parse_args()
 print(args)
 
