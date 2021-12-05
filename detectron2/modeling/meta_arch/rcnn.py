@@ -55,6 +55,14 @@ class GeneralizedRCNN(nn.Module):
         self.backbone = backbone
         self.proposal_generator = proposal_generator
         self.roi_heads = roi_heads
+        #EXP1
+        #self.epsilon = 14/255
+        #self.alpha = 1/255
+        #self.num_iter = 2
+        #EXP2
+        self.epsilon = 20/255
+        self.alpha = 7/255
+        self.num_iter = 4
 
         self.input_format = input_format
         self.vis_period = vis_period
@@ -66,6 +74,7 @@ class GeneralizedRCNN(nn.Module):
         assert (
             self.pixel_mean.shape == self.pixel_std.shape
         ), f"{self.pixel_mean} and {self.pixel_std} have different shapes!"
+
 
     @classmethod
     def from_config(cls, cfg):
@@ -119,6 +128,67 @@ class GeneralizedRCNN(nn.Module):
             storage.put_image(vis_name, vis_img)
             break  # only visualize one image in a batch
 
+    #ATAQUE ADVERSARIO
+
+    def attack(self, images, batched_inputs, epsilon, alpha, num_iter):
+        
+        for p in self.backbone.parameters():
+            p.requires_grad = False
+
+        for p in self.proposal_generator.parameters():
+            p.requires_grad = False
+
+        for p in self.roi_heads.parameters():
+            p.requires_grad = False
+
+        image_copy = torch.clone(images.tensor)
+        delta = torch.zeros_like(images.tensor, requires_grad=True)
+
+        for iteration in range(num_iter):
+
+            image = image_copy + delta
+            if "instances" in batched_inputs[0]:
+                gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
+            else:
+                gt_instances = None
+
+            features = self.backbone(image)
+            images.tensor = images.tensor + delta
+
+            if self.proposal_generator is not None:
+                proposals, proposal_losses = self.proposal_generator(images, features, gt_instances)
+            else:
+                assert "proposals" in batched_inputs[0]
+                proposals = [x["proposals"].to(self.device) for x in batched_inputs]
+                proposal_losses = {}
+
+            _, detector_losses = self.roi_heads(images, features, proposals, gt_instances)
+            
+            losses = {}
+            losses.update(detector_losses)
+            losses.update(proposal_losses)
+            losses_values = list(losses.values())
+            #EXP 1-4 
+            #total_loss = losses_values[0]+losses_values[1]+losses_values[2]+losses_values[3]+losses_values[4]+losses_values[5]+losses_values[6]+losses_values[7]
+            #EXP 5
+            #total_loss = losses_values[0]+losses_values[1]+losses_values[6]+losses_values[7]
+            #EXP 6
+            total_loss = losses_values[2]+losses_values[3]+losses_values[4]+losses_values[5]
+            total_loss.backward()
+            delta.data = (delta+alpha*delta.grad.data.detach().sign()).clamp(-epsilon, epsilon)
+            delta.grad.zero_()
+
+        for p in self.backbone.parameters():
+            p.requires_grad = True
+
+        for p in self.proposal_generator.parameters():
+            p.requires_grad = True
+
+        for p in self.roi_heads.parameters():
+            p.requires_grad = True   
+
+        return delta
+
     def forward(self, batched_inputs: List[Dict[str, torch.Tensor]]):
         """
         Args:
@@ -142,10 +212,14 @@ class GeneralizedRCNN(nn.Module):
                 The :class:`Instances` object has the following keys:
                 "pred_boxes", "pred_classes", "scores", "pred_masks", "pred_keypoints"
         """
+       
         if not self.training:
             return self.inference(batched_inputs)
 
         images = self.preprocess_image(batched_inputs)
+        delta = self.attack(images, batched_inputs, self.epsilon, self.alpha, self.num_iter)
+        images.tensor = images.tensor + delta
+
         if "instances" in batched_inputs[0]:
             gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
         else:
