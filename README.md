@@ -31,4 +31,17 @@ You will find the *main.py* by running the following command:
 ```
 cd projects/Densepose
 ```
+## Running main.py
+To replicate the results of the best model described in the paper you can run the following command:
+```
+python main.py --mode test
+```
+To visualize the performance of the model over an image you can run the following command:
+```
+python main.py --mode demo --img image_0.png
+```
+where *image_0.png* is the image that will be tested. By default, you will encounter the image *cicla.jpg*. 
+
+After this process, you will obtain a series of images according to the U_coordinates, V_coordinates, Segmentation and Contour_plots. 
+
 
